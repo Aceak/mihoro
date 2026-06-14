@@ -3,7 +3,7 @@ use crate::config::{apply_mihomo_override, parse_config, Config};
 use crate::cron;
 use crate::proxy::{proxy_export_cmd, proxy_unset_cmd};
 use crate::resolve_mihomo_bin;
-use crate::systemctl::Systemctl;
+use crate::systemctl::{Systemctl, SystemdScope};
 use crate::ui::{install_ui, resolve_external_ui_path};
 use crate::utils::{
     create_parent_dir, delete_file, download_file, extract_gzip, try_decode_base64_file_inplace,
@@ -35,6 +35,7 @@ pub struct Mihoro {
     pub mihomo_target_config_root: String,
     pub mihomo_target_config_path: String,
     pub mihomo_target_service_path: String,
+    pub systemd_scope: SystemdScope,
 }
 
 /// Outcome of a single setup stage, used by `mihoro init`.
@@ -60,22 +61,30 @@ pub enum BinaryPlan {
 impl Mihoro {
     pub fn new(config_path: &str) -> Result<Mihoro> {
         let config = parse_config(tilde(config_path).as_ref())?;
-        Ok(Self::from_config(config))
+        // Auto-detect: system-level service file exists → system scope
+        let system = Path::new("/etc/systemd/system/mihomo.service").exists();
+        Ok(Self::from_config(config, system))
     }
 
     /// Build a `Mihoro` from an already-validated `Config`.
-    pub fn from_config(config: Config) -> Mihoro {
+    pub fn from_config(config: Config, system: bool) -> Mihoro {
+        let scope = if system {
+            SystemdScope::System
+        } else {
+            SystemdScope::User
+        };
+        let service_root = match scope {
+            SystemdScope::User => tilde(&config.user_systemd_root).to_string(),
+            SystemdScope::System => "/etc/systemd/system".to_string(),
+        };
         Mihoro {
             prefix: String::from("mihoro:"),
             mihomo_target_binary_path: tilde(&config.mihomo_binary_path).to_string(),
             mihomo_target_config_root: tilde(&config.mihomo_config_root).to_string(),
             mihomo_target_config_path: tilde(&format!("{}/config.yaml", config.mihomo_config_root))
                 .to_string(),
-            mihomo_target_service_path: tilde(&format!(
-                "{}/mihomo.service",
-                config.user_systemd_root
-            ))
-            .to_string(),
+            mihomo_target_service_path: format!("{}/mihomo.service", service_root),
+            systemd_scope: scope,
             config,
         }
     }
@@ -130,7 +139,9 @@ impl Mihoro {
                 "{} Stopping mihomo.service before overwriting binary...",
                 DETAIL_PREFIX.cyan()
             );
-            Systemctl::new().stop("mihomo.service").execute()?;
+            Systemctl::with_scope(self.systemd_scope)
+                .stop("mihomo.service")
+                .execute()?;
         }
 
         extract_gzip(
@@ -251,6 +262,7 @@ impl Mihoro {
         let service_content = render_service_string(
             &self.mihomo_target_binary_path,
             &self.mihomo_target_config_root,
+            self.systemd_scope,
         );
         if let Ok(existing) = fs::read_to_string(&self.mihomo_target_service_path) {
             if existing == service_content {
@@ -259,7 +271,9 @@ impl Mihoro {
         }
         create_parent_dir(Path::new(&self.mihomo_target_service_path))?;
         fs::write(&self.mihomo_target_service_path, &service_content)?;
-        Systemctl::new().daemon_reload().execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .daemon_reload()
+            .execute()?;
         println!(
             "{} Created mihomo.service at {}",
             DETAIL_PREFIX.cyan(),
@@ -273,8 +287,8 @@ impl Mihoro {
     /// Always enables mihomo.service so it survives reboots, even if it was already running but
     /// not enabled (e.g. started manually after a previous failed init).
     pub async fn ensure_service_running(&self) -> Result<StageStatus> {
-        let is_active = Systemctl::is_active("mihomo.service");
-        let is_enabled = Systemctl::is_enabled("mihomo.service");
+        let is_active = Systemctl::with_scope(self.systemd_scope).is_active("mihomo.service");
+        let is_enabled = Systemctl::with_scope(self.systemd_scope).is_enabled("mihomo.service");
 
         if is_active && is_enabled {
             return Ok(StageStatus::Skipped(
@@ -283,10 +297,14 @@ impl Mihoro {
         }
 
         if !is_enabled {
-            Systemctl::new().enable("mihomo.service").execute()?;
+            Systemctl::with_scope(self.systemd_scope)
+                .enable("mihomo.service")
+                .execute()?;
         }
         if !is_active {
-            Systemctl::new().start("mihomo.service").execute()?;
+            Systemctl::with_scope(self.systemd_scope)
+                .start("mihomo.service")
+                .execute()?;
         }
         Ok(StageStatus::Installed)
     }
@@ -370,7 +388,9 @@ impl Mihoro {
             "{} Stopping mihomo.service before overwriting...",
             DETAIL_PREFIX.yellow()
         );
-        Systemctl::new().stop("mihomo.service").execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .stop("mihomo.service")
+            .execute()?;
 
         // Extract and overwrite the binary
         extract_gzip(
@@ -465,7 +485,9 @@ impl Mihoro {
 
     pub async fn restart_service(&self) -> Result<StageStatus> {
         println!("{} Restarting mihomo.service...", DETAIL_PREFIX.cyan());
-        Systemctl::new().restart("mihomo.service").execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .restart("mihomo.service")
+            .execute()?;
         Ok(StageStatus::Installed)
     }
 
@@ -481,7 +503,7 @@ impl Mihoro {
         )?;
 
         // Restart mihomo systemd service
-        Systemctl::new()
+        Systemctl::with_scope(self.systemd_scope)
             .restart("mihomo.service")
             .execute()
             .map(|_| {
@@ -491,14 +513,22 @@ impl Mihoro {
     }
 
     pub fn uninstall(&self) -> Result<()> {
-        Systemctl::new().stop("mihomo.service").execute()?;
-        Systemctl::new().disable("mihomo.service").execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .stop("mihomo.service")
+            .execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .disable("mihomo.service")
+            .execute()?;
 
         delete_file(&self.mihomo_target_service_path, self.prefix.cyan())?;
         delete_file(&self.mihomo_target_config_path, self.prefix.cyan())?;
 
-        Systemctl::new().daemon_reload().execute()?;
-        Systemctl::new().reset_failed().execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .daemon_reload()
+            .execute()?;
+        Systemctl::with_scope(self.systemd_scope)
+            .reset_failed()
+            .execute()?;
         println!(
             "{} Disabled and reloaded systemd services",
             self.prefix.green()
@@ -635,7 +665,11 @@ fn normalize_mihomo_version_token(token: &str) -> Option<String> {
 /// Render the systemd unit file content for mihomo.service.
 ///
 /// Reference: https://wiki.metacubex.one/startup/service/
-fn render_service_string(binary_path: &str, config_root: &str) -> String {
+fn render_service_string(binary_path: &str, config_root: &str, scope: SystemdScope) -> String {
+    let wanted_by = match scope {
+        SystemdScope::User => "default.target",
+        SystemdScope::System => "multi-user.target",
+    };
     format!(
         "[Unit]
 Description=mihomo Daemon, Another Clash Kernel.
@@ -651,8 +685,8 @@ ExecStart={} -d {}
 ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
-WantedBy=default.target",
-        binary_path, config_root
+WantedBy={}",
+        binary_path, config_root, wanted_by
     )
 }
 

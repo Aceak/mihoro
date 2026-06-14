@@ -31,6 +31,10 @@ pub enum Commands {
         /// ppc64le, riscv64, s390x
         #[arg(long)]
         arch: Option<String>,
+
+        /// Install as system-level service (requires root, default: user-level)
+        #[arg(long)]
+        system: bool,
     },
     /// Deprecated: use `mihoro init` instead
     #[command(hide = true)]

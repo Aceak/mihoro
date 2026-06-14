@@ -14,6 +14,7 @@ pub struct InitOptions {
     pub force: bool,
     pub arch: Option<String>,
     pub yes: bool,
+    pub system: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +304,16 @@ pub async fn run(config_path: &str, client: &Client, opts: InitOptions) -> Resul
     let config = bootstrap_config(config_path, opts.yes)?;
     validate_config(&config)?;
 
-    let mihoro = Mihoro::from_config(config.clone());
+    // Fail early before any downloads if we can't write to the system service directory
+    if opts.system && std::fs::write("/etc/systemd/system/.mihoro_test", b"").is_err() {
+        bail!(
+            "--system requires root privileges\n       Try: {}",
+            "sudo mihoro init --system".bold()
+        );
+    }
+    let _ = std::fs::remove_file("/etc/systemd/system/.mihoro_test");
+
+    let mihoro = Mihoro::from_config(config.clone(), opts.system);
 
     println!("{} initializing", "mihoro:".cyan().bold());
 
