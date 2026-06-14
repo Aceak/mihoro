@@ -2,54 +2,76 @@ use std::process::{Command, ExitStatus};
 
 use anyhow::{Context, Result};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SystemdScope {
+    User,
+    System,
+}
+
 pub struct Systemctl {
     systemctl: Command,
+    scope: SystemdScope,
 }
 
 impl Systemctl {
-    pub fn new() -> Self {
+    pub fn with_scope(scope: SystemdScope) -> Self {
         Self {
             systemctl: Command::new("systemctl"),
+            scope,
+        }
+    }
+
+    fn add_scope_arg(&mut self) {
+        if matches!(self.scope, SystemdScope::User) {
+            self.systemctl.arg("--user");
         }
     }
 
     pub fn enable(&mut self, service: &str) -> &mut Self {
-        self.systemctl.arg("--user").arg("enable").arg(service);
+        self.add_scope_arg();
+        self.systemctl.arg("enable").arg(service);
         self
     }
 
     pub fn start(&mut self, service: &str) -> &mut Self {
-        self.systemctl.arg("--user").arg("start").arg(service);
+        self.add_scope_arg();
+        self.systemctl.arg("start").arg(service);
         self
     }
 
     pub fn stop(&mut self, service: &str) -> &mut Self {
-        self.systemctl.arg("--user").arg("stop").arg(service);
+        self.add_scope_arg();
+        self.systemctl.arg("stop").arg(service);
         self
     }
 
     pub fn restart(&mut self, service: &str) -> &mut Self {
-        self.systemctl.arg("--user").arg("restart").arg(service);
+        self.add_scope_arg();
+        self.systemctl.arg("restart").arg(service);
         self
     }
 
     pub fn status(&mut self, service: &str) -> &mut Self {
-        self.systemctl.arg("--user").arg("status").arg(service);
+        self.add_scope_arg();
+        self.systemctl.arg("status").arg(service);
         self
     }
 
     pub fn disable(&mut self, service: &str) -> &mut Self {
-        self.systemctl.arg("--user").arg("disable").arg(service);
+        self.add_scope_arg();
+        self.systemctl.arg("disable").arg(service);
         self
     }
 
     pub fn daemon_reload(&mut self) -> &mut Self {
-        self.systemctl.arg("--user").arg("daemon-reload");
+        self.add_scope_arg();
+        self.systemctl.arg("daemon-reload");
         self
     }
 
     pub fn reset_failed(&mut self) -> &mut Self {
-        self.systemctl.arg("--user").arg("reset-failed");
+        self.add_scope_arg();
+        self.systemctl.arg("reset-failed");
         self
     }
 
@@ -60,11 +82,13 @@ impl Systemctl {
             .with_context(|| "failed to execute systemctl")
     }
 
-    /// Returns `true` if the given user service is currently active.
-    pub fn is_active(service: &str) -> bool {
-        Command::new("systemctl")
-            .arg("--user")
-            .arg("is-active")
+    /// Returns `true` if the given service is currently active.
+    pub fn is_active(&self, service: &str) -> bool {
+        let mut cmd = Command::new("systemctl");
+        if matches!(self.scope, SystemdScope::User) {
+            cmd.arg("--user");
+        }
+        cmd.arg("is-active")
             .arg("--quiet")
             .arg(service)
             .status()
@@ -72,11 +96,13 @@ impl Systemctl {
             .unwrap_or(false)
     }
 
-    /// Returns `true` if the given user service is enabled for autostart.
-    pub fn is_enabled(service: &str) -> bool {
-        Command::new("systemctl")
-            .arg("--user")
-            .arg("is-enabled")
+    /// Returns `true` if the given service is enabled for autostart.
+    pub fn is_enabled(&self, service: &str) -> bool {
+        let mut cmd = Command::new("systemctl");
+        if matches!(self.scope, SystemdScope::User) {
+            cmd.arg("--user");
+        }
+        cmd.arg("is-enabled")
             .arg("--quiet")
             .arg(service)
             .status()
