@@ -17,8 +17,10 @@
 **mihoro** - The 🦀 Rust™-based [Mihomo](https://github.com/MetaCubeX/mihomo) CLI client on Linux.
 
 - Setup, update, apply overrides, and manage with systemd. **No more, no less.**
-- No root privilege required. Maintains per-user instance.
+- Default per-user instance. Optional system-level service via `--system`.
 - First-class support for config subscription.
+
+*Forked from [spencerwooo/mihoro](https://github.com/spencerwooo/mihoro) — adds system-level systemd support (`mihoro init --system`).*
 
 <img width="1136" height="911" alt="screenshot" src="https://github.com/user-attachments/assets/abfeb381-3ea2-45c8-ac0a-d55f7ba35fbb" />
 
@@ -117,6 +119,14 @@ Use `--arch` if auto-detection picks the wrong mihomo build for your machine:
 ```bash
 mihoro init --arch amd64-v3
 ```
+
+To install as a system-level service instead of per-user (requires root):
+
+```bash
+sudo mihoro init --system
+```
+
+Subsequent commands (`start`, `stop`, `restart`, `status`, `log`, `apply`, `update`, `uninstall`) auto-detect the scope — no extra flags needed.
 
 ## Usage
 
