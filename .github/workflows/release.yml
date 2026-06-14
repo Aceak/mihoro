@@ -42,7 +42,7 @@ jobs:
       - name: Stamp version with commit hash
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          sed -i "s/^version = \"\(.*\)\"/version = \"\1.${SHORT_SHA}\"/" Cargo.toml
+          sed -i "s/^version = \"\(.*\)\"/version = \"\1+git.${SHORT_SHA}\"/" Cargo.toml
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
 
       - name: Build binaries
@@ -58,7 +58,7 @@ jobs:
 
       - name: Package binaries
         run: |
-          ARTIFACT="mihoro-${{ github.ref_name }}.${{ env.SHORT_SHA }}-${{ matrix.target }}.tar.gz"
+          ARTIFACT="mihoro-${{ github.ref_name }}+git.${{ env.SHORT_SHA }}-${{ matrix.target }}.tar.gz"
           cd target/${{ matrix.target }}/release
           tar -czvf "$ARTIFACT" mihoro
           echo "ARTIFACT=$ARTIFACT" >> $GITHUB_ENV
