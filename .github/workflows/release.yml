@@ -6,6 +6,9 @@ on:
     tags:
       - "*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build and publish release
@@ -70,4 +73,4 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/${{ matrix.target }}/release/${{ env.ARTIFACT }}
           asset_name: ${{ env.ARTIFACT }}
-          tag: ${{ github.ref }}
+          tag: ${{ github.ref_name }}
